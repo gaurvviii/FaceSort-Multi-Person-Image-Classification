@@ -1,60 +1,61 @@
 import os
-import cv2
-import face_recognition
-import shutil
+import json
+import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.cluster import DBSCAN
+from collections import defaultdict
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.preprocessing import image as keras_image
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
-# Create output folder
-output_dir = 'output'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+def load_config():
+    with open('config.json') as config_file:
+        return json.load(config_file)
 
-# Helper function to save images to respective folders
-def save_image(image_path, person_id, output_dir):
-    person_dir = os.path.join(output_dir, str(person_id))
-    if not os.path.exists(person_dir):
-        os.makedirs(person_dir)
-    shutil.copy(image_path, person_dir)
+def extract_features(model, img_path):
+    img = keras_image.load_img(img_path, target_size=(224, 224))
+    img_array = keras_image.img_to_array(img)
+    img_array = np.expand_dims(img_array, axis=0)
+    img_array = preprocess_input(img_array)
+    features = model.predict(img_array)
+    return features.flatten()
 
-# Function to process images and classify by person
-def classify_images(input_folder):
-    known_encodings = []
-    person_id = 0
-    person_map = {}
+def process_images(config):
+    data_directory = config['data_directory']
+    output_directory = config['output_directory']
     
-    for image_name in os.listdir(input_folder):
-        image_path = os.path.join(input_folder, image_name)
-        image = face_recognition.load_image_file(image_path)
-        face_locations = face_recognition.face_locations(image)
-        face_encodings = face_recognition.face_encodings(image, face_locations)
-        
-        for face_encoding in face_encodings:
-            match = None
-            if len(known_encodings) > 0:
-                matches = face_recognition.compare_faces(known_encodings, face_encoding)
-                if True in matches:
-                    match = matches.index(True)
-            
-            if match is not None:
-                save_image(image_path, match, output_dir)
-            else:
-                known_encodings.append(face_encoding)
-                person_id += 1
-                save_image(image_path, person_id, output_dir)
-                person_map[person_id] = image_name
-    
-    print(f"Total people detected: {person_id}")
-    return person_map
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
 
-# Plot results
-def plot_results(person_map):
-    plt.bar(person_map.keys(), [1] * len(person_map))
-    plt.xlabel("Person ID")
-    plt.ylabel("Count")
-    plt.title("Detected Individuals")
-    plt.show()
+    filenames = [os.path.join(data_directory, fname) for fname in os.listdir(data_directory) 
+                 if fname.endswith(tuple(config['image_extensions']))]
+    
+    model = MobileNetV2(weights=config['model']['weights'], include_top=False, input_shape=config['model']['input_shape'])
+
+    feature_list = []
+    for fname in filenames:
+        features = extract_features(model, fname)
+        feature_list.append(features)
+
+    feature_array = np.array(feature_list)
+
+    dbscan = DBSCAN(eps=config['dbscan']['eps'], min_samples=config['dbscan']['min_samples'])
+    labels = dbscan.fit_predict(feature_array)
+
+    unique_labels = set(labels)
+    print(f'Total individuals detected: {len(unique_labels) - (1 if -1 in unique_labels else 0)}')
+
+    id_to_images = defaultdict(list)
+
+    for idx, label in enumerate(labels):
+        if label != -1:
+            id_to_images[label].append(filenames[idx])
+
+    # Saving images and plotting can follow
+
+def main():
+    config = load_config()
+    process_images(config)
 
 if __name__ == "__main__":
-    input_folder = 'task-1'  
-    person_map = classify_images(input_folder)
-    plot_results(person_map)
+    main()
