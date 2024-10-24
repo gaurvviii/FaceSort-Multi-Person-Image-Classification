@@ -1,0 +1,13 @@
+{
+    "data_directory": "data",
+    "output_directory": "output",
+    "image_extensions": [".jpg", ".jpeg", ".png"],
+    "model": {
+        "weights": "imagenet",
+        "input_shape": [224, 224, 3]
+    },
+    "dbscan": {
+        "eps": 0.5,
+        "min_samples": 2
+    }
+}
